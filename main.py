@@ -16,7 +16,7 @@ bot.
 
 import os
 import logging
-from typing import Dict
+from typing import Dict, List
 
 from telegram import ReplyKeyboardMarkup, ReplyKeyboardRemove, Update, BotCommand
 from telegram.ext import (
@@ -29,160 +29,161 @@ from telegram.ext import (
     filters,
 )
 
-# Enable logging
+#Включение логирования
 logging.basicConfig(
     format="%(asctime)s - %(name)s - %(levelname)s - %(message)s", level=logging.INFO
 )
-# set higher logging level for httpx to avoid all GET and POST requests being logged
-logging.getLogger("httpx").setLevel(logging.WARNING)
-
 logger = logging.getLogger(__name__)
 
-CHOOSING, TYPING_REPLY, TYPING_CHOICE = range(3)
+#Состояния разговора
+NOTES, SHOPPING_LIST, CHOOSING, DELETE_NOTE, DELETE_ITEM, MARK_ITEM = range(6)
 
+#Клавиатура для выбора действий
 reply_keyboard = [
-    ["Age", "Favourite colour"],
-    ["Number of siblings", "Something else..."],
-    ["Done"],
+    ["Добавить заметку", "Просмотреть заметки"],
+    ["Добавить товар", "Просмотреть список покупок"],
+    ["Удалить заметку", "Удалить товар"],
+    ["Готово"],
 ]
 markup = ReplyKeyboardMarkup(reply_keyboard, one_time_keyboard=True)
 
-
-def facts_to_str(user_data: Dict[str, str]) -> str:
-    """Helper function for formatting the gathered user info."""
-    facts = [f"{key} - {value}" for key, value in user_data.items()]
+def facts_to_str(user_data: Dict[str, List[str]]) -> str:
+    """Функция для форматирования собранной информации."""
+    facts = [f"{key}: {', '.join(values)}" for key, values in user_data.items() if values]
     return "\n".join(facts).join(["\n", "\n"])
 
-
 async def start(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
-    """Start the conversation, display any stored data and ask user for input."""
+    """Начало разговора и показ опций."""
     user = update.message.from_user
-    logger.info(f"User {user.full_name} started app.")
+    logger.info(f"Пользователь {user.full_name} начал разговор.")
     
-    reply_text = "Hi! My name is Doctor Botter."
-    if context.user_data:
-        reply_text += (
-            f" You already told me your {', '.join(context.user_data.keys())}. Why don't you "
-            "tell me something more about yourself? Or change anything I already know."
-        )
-    else:
-        reply_text += (
-            " I will hold a more complex conversation with you. Why don't you tell me "
-            "something about yourself?"
-        )
-    await update.message.reply_text(reply_text, reply_markup=markup)
-
-    return CHOOSING
-
-
-async def regular_choice(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
-    """Ask the user for info about the selected predefined choice."""
-    text = update.message.text.lower()
-    context.user_data["choice"] = text
-    if context.user_data.get(text):
-        reply_text = (
-            f"Your {text}? I already know the following about that: {context.user_data[text]}"
-        )
-    else:
-        reply_text = f"Your {text}? Yes, I would love to hear about that!"
-    await update.message.reply_text(reply_text)
-
-    return TYPING_REPLY
-
-
-async def custom_choice(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
-    """Ask the user for a description of a custom category."""
     await update.message.reply_text(
-        'Alright, please send me the category first, for example "Most impressive skill"'
-    )
-
-    return TYPING_CHOICE
-
-
-async def received_information(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
-    """Store info provided by user and ask for the next category."""
-    text = update.message.text
-    category = context.user_data["choice"]
-    context.user_data[category] = text.lower()
-    del context.user_data["choice"]
-
-    await update.message.reply_text(
-        "Neat! Just so you know, this is what you already told me:"
-        f"{facts_to_str(context.user_data)}"
-        "You can tell me more, or change your opinion on something.",
-        reply_markup=markup,
+        "Добро пожаловать! Я могу помочь вам управлять вашими заметками и списком покупок. Что бы вы хотели сделать?",
+        reply_markup=markup
     )
 
     return CHOOSING
 
+async def choosing_action(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
+    """Выбор действия на основе ввода пользователя."""
+    user_choice = update.message.text
+    if user_choice == "Добавить заметку":
+        await update.message.reply_text("Пожалуйста, отправьте мне вашу заметку.")
+        return NOTES
+    elif user_choice == "Просмотреть заметки":
+        notes = context.user_data.get("notes", [])
+        if notes:
+            await update.message.reply_text(f"Ваши заметки:\n{''.join(notes)}")
+        else:
+            await update.message.reply_text("У вас пока нет заметок.")
+        return CHOOSING
+    elif user_choice == "Добавить товар":
+        await update.message.reply_text("Пожалуйста, отправьте мне товар для вашего списка покупок.")
+        return SHOPPING_LIST
+    elif user_choice == "Просмотреть список покупок":
+        shopping_list = context.user_data.get("shopping_list", [])
+        if shopping_list:
+            await update.message.reply_text(f"Ваш список покупок:\n{''.join(shopping_list)}")
+        else:
+            await update.message.reply_text("Ваш список покупок пуст.")
+        return CHOOSING
+    elif user_choice == "Удалить заметку":
+        await update.message.reply_text("Пожалуйста, отправьте мне заметку, которую вы хотите удалить.")
+        return DELETE_NOTE
+    elif user_choice == "Удалить товар":
+        await update.message.reply_text("Пожалуйста, отправьте мне товар, который вы хотите удалить.")
+        return DELETE_ITEM
+    elif user_choice == "Готово":
+        await update.message.reply_text("До свидания!", reply_markup=ReplyKeyboardRemove())
+        return ConversationHandler.END
 
-async def show_data(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
-    """Display the gathered info."""
-    await update.message.reply_text(
-        f"This is what you already told me: {facts_to_str(context.user_data)}"
-    )
+async def add_note(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
+    """Добавить заметку в данные пользователя."""
+    note = update.message.text
+    context.user_data.setdefault("notes", []).append(note + "\n")
+    await update.message.reply_text("Заметка добавлена! Что бы вы хотели сделать дальше?")
+    return CHOOSING
 
+async def add_item(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
+    """Добавить товар в список покупок."""
+    item = update.message.text
+    context.user_data.setdefault("shopping_list", []).append(item + "\n")
+    await update.message.reply_text("Товар добавлен! Что бы вы хотели сделать дальше?")
+    return CHOOSING
 
-async def done(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
-    """Display the gathered info and end the conversation."""
-    if "choice" in context.user_data:
-        del context.user_data["choice"]
+async def delete_note(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
+    """Удалить заметку из данных пользователя."""
+    note = update.message.text
+    notes = context.user_data.get("notes", [])
+    
+    if note + "\n" in notes:
+        notes.remove(note + "\n")
+        context.user_data["notes"] = notes
+        await update.message.reply_text("Заметка удалена! Что бы вы хотели сделать дальше?")
+    else:
+        await update.message.reply_text("Эта заметка не найдена.")
+    
+    return CHOOSING
 
-    await update.message.reply_text(
-        f"I learned these facts about you: {facts_to_str(context.user_data)}Until next time!",
-        reply_markup=ReplyKeyboardRemove(),
-    )
+async def delete_item(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
+    """Удалить товар из списка покупок."""
+    item = update.message.text
+    shopping_list = context.user_data.get("shopping_list", [])
+    
+    if item + "\n" in shopping_list:
+        shopping_list.remove(item + "\n")
+        context.user_data["shopping_list"] = shopping_list
+        await update.message.reply_text("Товар удален! Что бы вы хотели сделать дальше?")
+    else:
+        await update.message.reply_text("Этот товар не найден в списке покупок.")
+    
+    return CHOOSING
+
+async def cancel(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
+    """Отменить разговор."""
+    await update.message.reply_text("Пока! Если захотите поговорить снова, просто введите /start.", reply_markup=ReplyKeyboardRemove())
     return ConversationHandler.END
 
-# Функция для регистрации команд в BotFather
+# Функция для регистрации команд бота
 async def post_init(application: Application) -> None:
     bot_commands = [
-        BotCommand("start", "Начало работы с ботом"),
-        # BotCommand("cancel", "Отменить текущую операцию")
+        BotCommand("start", "Начать беседу"),
+        BotCommand("cancel", "Отменить текущую операцию"),
     ]
     await application.bot.set_my_commands(bot_commands)
 
 def main() -> None:
-    """Run the bot."""
-    # Create the Application and pass it your bot's token.
-    persistence = PicklePersistence(filepath="data/data", single_file=False)
-    application = Application.builder().token(os.getenv("BOT_TOKEN")).persistence(persistence).post_init(post_init).build()
-
-    # Add conversation handler with the states CHOOSING, TYPING_CHOICE and TYPING_REPLY
+    """Запустить бота."""
+    #Создание приложения и передача токена бота.
+    application = Application.builder().token("8034817958:AAHgD2iPUZUFEGVlB8aLlWQND7ujP42wBw0").build()
+    #Добавление обработчика разговора с состояниями
     conv_handler = ConversationHandler(
         entry_points=[CommandHandler("start", start)],
         states={
             CHOOSING: [
-                MessageHandler(
-                    filters.Regex("^(Age|Favourite colour|Number of siblings)$"), regular_choice
-                ),
-                MessageHandler(filters.Regex("^Something else...$"), custom_choice),
+                MessageHandler(filters.TEXT & ~(filters.COMMAND), choosing_action),
             ],
-            TYPING_CHOICE: [
-                MessageHandler(
-                    filters.TEXT & ~(filters.COMMAND | filters.Regex("^Done$")), regular_choice
-                )
+            NOTES: [
+                MessageHandler(filters.TEXT & ~(filters.COMMAND), add_note),
             ],
-            TYPING_REPLY: [
-                MessageHandler(
-                    filters.TEXT & ~(filters.COMMAND | filters.Regex("^Done$")),
-                    received_information,
-                )
+            SHOPPING_LIST: [
+                MessageHandler(filters.TEXT & ~(filters.COMMAND), add_item),
+            ],
+            DELETE_NOTE: [
+                MessageHandler(filters.TEXT & ~(filters.COMMAND), delete_note),
+            ],
+            DELETE_ITEM: [
+                MessageHandler(filters.TEXT & ~(filters.COMMAND), delete_item),
             ],
         },
-        fallbacks=[MessageHandler(filters.Regex("^Done$"), done)],
-        name="my_conversation",
-        persistent=True,
+        fallbacks=[CommandHandler("cancel", cancel)],
+        name="my_conversation"
     )
 
     application.add_handler(conv_handler)
 
-    show_data_handler = CommandHandler("show_data", show_data)
-    application.add_handler(show_data_handler)
-
-    # Run the bot until the user presses Ctrl-C
+    #Запустить бота, пока пользователь не нажмет Ctrl-C
     application.run_polling(allowed_updates=Update.ALL_TYPES)
-
 
 if __name__ == "__main__":
     main()
