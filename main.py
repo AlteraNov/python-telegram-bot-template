@@ -155,7 +155,7 @@ async def post_init(application: Application) -> None:
 def main() -> None:
     """Запустить бота."""
     #Создание приложения и передача токена бота.
-    application = Application.builder().token("8034817958:AAHgD2iPUZUFEGVlB8aLlWQND7ujP42wBw0").build()
+    application = Application.builder().token(os.getenv("BOT_TOKEN")).build()
     #Добавление обработчика разговора с состояниями
     conv_handler = ConversationHandler(
         entry_points=[CommandHandler("start", start)],
